@@ -1,26 +1,26 @@
-from datetime import datetime
 import uuid
+from datetime import datetime
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
 default_args = {
-    'owner' : 'Amey Bhilegaonkar',
-    'start_date': datetime(2024, 2, 6, 10, 00),
+    'owner': 'airscholar',
+    'start_date': datetime(2023, 9, 3, 10, 00)
 }
 
-
 def get_data():
-    import json
     import requests
 
-    response = requests.get('https://randomuser.me/api')
-    response = response.json()['results'][0]
-    return response
+    res = requests.get("https://randomuser.me/api/")
+    res = res.json()
+    res = res['results'][0]
+
+    return res
 
 def format_data(res):
     data = {}
     location = res['location']
-    # data['id'] = uuid.uuid4()
+    data['id'] = uuid.uuid4()
     data['first_name'] = res['name']['first']
     data['last_name'] = res['name']['last']
     data['gender'] = res['gender']
@@ -40,19 +40,29 @@ def stream_data():
     import json
     from kafka import KafkaProducer
     import time
+    import logging
 
+    producer = KafkaProducer(bootstrap_servers=['broker:29092'], max_block_ms=5000)
+    curr_time = time.time()
 
-    res = get_data()
-    res = format_data(res)
+    while True:
+        if time.time() > curr_time + 60: #1 minute
+            break
+        try:
+            res = get_data()
+            res = format_data(res)
 
-    producer = KafkaProducer(bootstrap_servers=['localhost:9092'], max_block_ms = 5000)
-    producer.send('users_created', json.dumps(res).encode('utf-8'))
-# with DAG('user_automation',
-#          dafault_args=default_args,
-#          catchup=False
-#          ) as dag:
-#     straming_task = PythonOperator(
-#         task_id='stream_data_from_api',
-#         python_callable=stream_data
-#     )
-stream_data()
+            producer.send('users_created', json.dumps(res).encode('utf-8'))
+        except Exception as e:
+            logging.error(f'An error occured: {e}')
+            continue
+
+with DAG('user_automation',
+         default_args=default_args,
+         schedule_interval='@daily',
+         catchup=False) as dag:
+
+    streaming_task = PythonOperator(
+        task_id='stream_data_from_api',
+        python_callable=stream_data
+    )
